@@ -1,8 +1,6 @@
 # Firebytes Plugin README 
-========
 
 ## Summary
---------
 
 This README is here to give you a basic understanding on how to build some plugins. There is currently 1 plugin (hello.fireplug) included and 2 examples, these are:
 
@@ -12,7 +10,6 @@ This README is here to give you a basic understanding on how to build some plugi
 Take a look at "dummy.plug" for a basic idea on how plugins must be setup. If you want to use the [Metasploit Framework](https://www.metasploit.com/), it's recommended that you take a look at metasploit.plug
 
 ## Building Plugins
---------
 
 Plugins are simply Python scripts with a bit of special structure who are GZipped. That's it, nothing fancy. So writing a plugin should be very straight-foreward: simply write it like you would any other python script/module. There is a special module that you have access to when running as a FirePlug: fireIO logging. This is simply a class that does some fancy logging for you via the Firebytes application. See "FireIO Logger" down below for more.
 
@@ -67,7 +64,6 @@ Once you have your plugin written, save it as a "\*.py" file in the following di
 **NOTE:** When you run "mkplugins", you need to be *in* the "utils" directory.
 
 ## FireIO Logger
---------
 
 As mentioned earlier, there is a special logging utility that is available to the plugins: fireIO. This utility to simply added when you add the following import:
 ```python
@@ -111,16 +107,14 @@ The `debug_info` argument is optional and allows you to pass potential debugging
 The `plugin_id` argument is only used when the level is "Plugin" and it specifies the digit that follows "Plugin" on the log line. This can be a string or digit.
 
 # Metasploit
-========
 
 ## What is it?
---------
 
 The [Metasploit Framework](https://www.metasploit.com/) is a collection of exploits found by hackers and SecOps engineers that hobbists use to pen-test their own things. The plugin system has been designed in such a way that [Metasploit](https://www.metasploit.com/) works "out-of-the-box" so to say.
 Using these plugins does however, require that you have Metasploit installed: https://metasploit.help.rapid7.com/docs/installing-the-metasploit-framework
 
 ## Metasploit Plugins
---------
+
 Since writing a plugin can be a pain for non-Python devs, there is an example plugin that is provided for metasploit. This plugin actually works off of a "Metasploit Resource" document. 
 That document is actually a list of commands for the msfconsole that are run in a procedural (top-to-bottom) manner. The plugin will first attempt to pull down the resource doc. if it doesn't exist,
 it will then attempt to run the "msfconsole" command, using the resource document and parsing the commands output into a format that Firebytes understands. The plugin then will finish by returning the data to Firebytes

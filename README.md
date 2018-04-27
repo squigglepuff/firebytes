@@ -1,17 +1,13 @@
 # Firebytes README 
-========
 
 ## Summary
---------
 A stupid little side-project used to perform really hacky and rudimentary security/pen-testing. This application was designed initially to be a full blown pen-tester, but due to certain licensing issues and the MASSIVE workload, the application instead utilizes a plugin model. See plugins/README for more details.
 
 ## Language details
---------
 Primary Language: Python 2.7.x
 Additional Languages: BASH (<1%)
 
 ## Usage / Help
---------
 ```
 FireBytes Security Pen-Tester
 
@@ -50,11 +46,10 @@ FireBytes Pen-Tester v1
 ```
 
 ## Forking/Cloning
---------
 Go for it.
 
 # License : Apache 2
-========
+```
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
@@ -256,3 +251,4 @@ Go for it.
    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
    See the License for the specific language governing permissions and
    limitations under the License.
+```
