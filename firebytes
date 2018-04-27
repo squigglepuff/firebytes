@@ -1,0 +1,450 @@
+#!/usr/bin/env python
+# *-* coding: utf-8 *-*
+
+import sys
+import re
+import ssl
+import socket
+import os.path
+from datetime import datetime as dt
+
+from sec_utils.logger import fireIO
+from sec_utils.logger import PrintLog
+from sec_utils.logger import DumpLog
+from sec_utils.logger import TruncateLog
+
+from plugin import PluginManager
+
+# Versioning.
+ver_Major = 1
+ver_Minor = 0
+ver_Rev = 9
+ver_Iter = 1
+
+# Global variables.
+g_testReport = "./pentest.report"
+g_reportHeader = "+-------------------------------------------------+\n|   (                                              |\n|   )\ )                   (            )          |\n|  (()/(  (   (      (   ( )\  (     ( /(   (      |\n|   /(_)) )\  )(    ))\  )((_) )\ )  )\()) ))\ (   |\n|  (_))_|((_)(()\  /((_)((_)_ (()/( (_))/ /((_))\  |\n|  | |_   (_) ((_)(_))   | _ ) )(_))| |_ (_)) ((_) |\n|  | __|  | || '_|/ -_)  | _ \| || ||  _|/ -_)(_-< |\n|  |_|    |_||_|  \___|  |___/ \_, | \__|\___|/__/ |\n|                              |__/                |\n+--------------------------------------------------+"
+
+g_testToRun = {'net_conn': True, 
+'net_ports': True, 
+'net_icmp': True, 
+'ssl_conn': True, 
+'ssl_ver': True, 
+'ssl_valid': True, 
+'ssl_self': True, 
+'ssl_cipher': True, 
+'ssl_hash': True,
+'php_remote': True,
+'php_disclose': True,
+'php_spoof': True,
+'plugins': True}
+g_portList = [443, 587, 993, 995, 8080]
+g_lHostname = ""
+
+g_disabledPlugs = []
+
+def ParseArgs(arg_list=[]):
+    global PrintLog
+    global g_testToRun
+    global g_portList
+    global g_lHostname
+    global g_allowDebug
+
+    if isinstance(arg_list, list):
+        if len(arg_list) <= 0:
+            arg_list = sys.argv
+
+        bGrabPorts = False
+        bGrabPlugins = False
+        for arg in arg_list:
+            if bGrabPorts == True:
+                g_portList = [ int(port) for port in arg.split(",") ]
+                PrintLog("Port List acquired: {0}".format(g_portList), "Debug")
+                bGrabPorts = False
+            elif bGrabPlugins == True:
+                g_disabledPlugs = [ plugin for plugin in arg.split(",") ]
+                PrintLog("Disabled plugin list acquired: {0}".format(g_disabledPlugs), "Debug")
+                bGrabPlugins = False
+            else:
+                if re.match('.*(firebytes|main)$', arg, re.IGNORECASE):
+                    continue
+
+                if arg == '--no-netconn':
+                    PrintLog("Skipping Network Connection test! Please test manually!", "Warning")
+                    g_testToRun['net_conn'] = False
+                elif arg == '--no-netport':
+                    PrintLog("Skipping Network Port Scan test! Please test manually!", "Warning")
+                    g_testToRun['net_ports'] = False
+                elif arg == '--no-neticmp':
+                    PrintLog("Skipping Network ICMP echo test! Please test manually!", "Warning")
+                    g_testToRun['net_icmp'] = False
+                elif arg == '--no-sslconn':
+                    PrintLog("Skipping SSL Connection test! Please test manually!", "Warning")
+                    g_testToRun['ssl_conn'] = False
+                elif arg == '--no-sslver':
+                    PrintLog("Skipping SSL Version test! Please test manually!", "Warning")
+                    g_testToRun['ssl_ver'] = False# code
+                elif arg == '--no-sslvalid':
+                    PrintLog("Skipping SSL Validity test! Please test manually!", "Warning")
+                    g_testToRun['ssl_valid'] = False
+                elif arg == '--no-sslself':
+                    PrintLog("Skipping SSL Self-Signed certificate test! Please test manually!", "Warning")
+                    g_testToRun['ssl_self'] = False
+                elif arg == '--no-sslcipher':
+                    PrintLog("Skipping SSL Cipher test! Please test manually!", "Warning")
+                    g_testToRun['ssl_cipher'] = False
+                elif arg == '--no-sslhash':
+                    PrintLog("Skipping SSL Signing Hash test! Please test manually!", "Warning")
+                    g_testToRun['ssl_hash'] = False
+                elif arg == "--no-phpremote":
+                    PrintLog("Skipping PHP remote include test! Please test manually!", "Warning")
+                    g_testToRun['php_remote'] = False
+                elif arg == "--no-phpdisclose":
+                    PrintLog("Skipping PHP local disclosure test! Please test manually!", "Warning")
+                    g_testToRun['php_disclose'] = False
+                elif arg == "--no-phpcookie":
+                    PrintLog("Skipping PHP cookie spoofing test! Please test manually!", "Warning")
+                    g_testToRun['php_spoof'] = False
+                elif arg == "--no-plugins":
+                    PrintLog("Skipping Plugins!", "Warning")
+                    g_testToRun['plugins'] = False
+                elif re.match('^\-(h|\-help)$', arg, re.IGNORECASE):
+                    sys.stdout.write("FireBytes Security Pen-Tester\n\nUsage:\n\tfirebytes <switches> [hostname]\n\nIf hostname is blank or not provided, the application will ask for one.\n\nSwitches:\n\t--no-netconn\t-\tDon't run the network connection test.\n\t--no-netport\t-\tDon't run the port scanning test.\n\t--no-neticmp\t-\tDon't run the ICMP test.\n\t\n\t--no-sslconn\t-\tDon't run the SSL connection test.\n\t--no-sslver\t-\tDon't run the SSL Version test.\n\t--no-sslvalid\t-\tDon't run the SSL validation test.\n\t--no-sslself\t-\tDon't run the SSL Self-Signed test.\n\t--no-sslcipher\t-\tDon't run the SSL Cipher test.\n\t--no-sslhash\t-\tDon't run the SSL Hash test.\n\n\t--no-phpremote\t-\tDon't attempt remote file inclusion for PHP.\n\t--no-phpdisclose-\tDon't attempt to disclose local fils for PHP.\n\t--no-phpcookie\t-\tDon't attempt PHP cookie injection.\n\n\t--no-plugins\t-\tDon't run ANY plugins\n\n\t-h,--help\t-\tDisplay this help\n\t-v,--version \t-\tShow the version\n\t-p,--ports\t-\tProvide a comma-separated list of ports to set the ports to scan.\n\t-d,--plugins \t-\tProvide a comma-separated list of plugins to disable.\n\t-x,--debug\t-\tShow debugging messages.\n\nFireBytes Pen-Tester v{0}\n{0}.{1}.{2} (Iteration {3})\n(c) Travis M Ervin (SquigglePuff Jr.)\n".format(ver_Major, ver_Minor, ver_Rev, ver_Iter))
+                    sys.exit(0)
+                elif re.match('^\-v(|\-version)$', arg, re.IGNORECASE):
+                    sys.stdout.write("FireBytes Pen-Tester v{0}\n{0}.{1}.{2} (Iteration {3})\n(c) Travis M Ervin (SquigglePuff Jr.)\n".format(ver_Major, ver_Minor, ver_Rev, ver_Iter))
+                    sys.exit(0)
+                elif re.match('^\-p(|\-ports)$', arg, re.IGNORECASE):
+                    bGrabPorts = True
+                elif re.match('^\-d(|\-plugins)$', arg, re.IGNORECASE):
+                    bGrabPlugins = True
+                elif re.match('^\-x(|\-debug)$', arg, re.IGNORECASE):
+                    fireIO.set_debug(True)
+                    fireIO.write("Enabled debugging messages!", "Debug")
+                else:
+                    g_lHostname = arg
+                    break
+
+        if bGrabPorts == True:
+            PrintLog("No ports passed! Please pass a comma-separated list of ports.", "Fatal")
+            sys.exit(255)
+
+    else:
+        PrintLog("Invalid argument list passed!", "Fatal")
+        sys.exit(255)
+
+def StatusToStr(test_value):
+    SEC_SUCCESS = 0x0
+    SEC_FAILURE = 0xccffccff
+
+    if test_value == SEC_SUCCESS:
+        return "SUCCESS"
+    elif test_value == SEC_FAILURE:
+        return "FAILURE"
+    
+    return "UNTESTED"
+
+def TestNetworking(testNet):
+    global g_testToRun
+    global g_lHostname
+    global g_portList
+
+    if g_testToRun['net_conn'] == True:
+        if not testNet.ConnectionTest(g_lHostname, 443):
+            PrintLog("Network test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['net_ports'] == True:
+        if not testNet.PortTest(g_lHostname, g_portList):
+            PrintLog("Network test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['net_icmp'] == True:
+        if not testNet.IcmpTest(g_lHostname):
+            PrintLog("Network test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    return True
+
+def TestSSL(testSSL):
+    global g_testToRun
+    global g_lHostname
+
+    if g_testToRun['ssl_conn'] == True:
+        if not testSSL.TestSSLConnection(g_lHostname):
+            PrintLog("SSL test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['ssl_ver'] == True:
+        if not testSSL.TestSSLVersion(g_lHostname):
+            PrintLog("SSL test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['ssl_valid'] == True:
+        if not testSSL.TestSSLValid(g_lHostname):
+            PrintLog("SSL test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['ssl_self'] == True:
+        if not testSSL.TestSSLSelfSign(g_lHostname):
+            PrintLog("SSL test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['ssl_cipher'] == True:
+        if not testSSL.TestSSLCiphers(g_lHostname):
+            PrintLog("SSL test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    if g_testToRun['ssl_hash'] == True:
+        if not testSSL.TestSSLHash(g_lHostname):
+            PrintLog("SSL test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    return True
+
+def TestPHP(testPHP):
+    global g_testToRun
+    global g_lHostname
+
+    if g_testToRun['php_remote'] == True:
+        if not testPHP.InjectRemoteInclude(g_lHostname, uri='/login_check', method='post', variable='username'):
+            PrintLog("PHP Remote File/Code Injection Test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+    if g_testToRun['php_disclose'] == True:
+        if not testPHP.DiscloseLocalFile(g_lHostname, uri='/login_check', method='post', variable='username'):
+            PrintLog("PHP Local File Disclosure Test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+    if g_testToRun['php_spoof'] == True:
+        if not testPHP.SpoofCookies(g_lHostname, uri='/login_check', secure_uri='/dashboard'):
+            PrintLog("PHP Cookie Spoof Test: FAILED!", "Failure")
+            PrintLog("A \"FAILED\" state found! Check log for more information", "Critical")
+            return False
+
+    return True
+
+
+def WriteReport(testNet, testSSL, testPHP, pluginTests=None, append=False, hdr=""):
+    global g_testReport
+    global g_reportHeader
+
+    # Network
+    connectStatus = "UNTESTED"
+    portStatus = "UNTESTED"
+    icmpStatus = "UNTESTED"
+    if testNet != None:
+        connectStatus = StatusToStr(testNet.m_testResults['connection'])
+        portStatus = StatusToStr(testNet.m_testResults['port'])
+        icmpStatus = StatusToStr(testNet.m_testResults['icmp'])
+
+    # SSL
+    sslConnectStatus = "UNTESTED"
+    versionStatus = "UNTESTED"
+    selfStatus = "UNTESTED"
+    validStatus = "UNTESTED"
+    cipherStatus = "UNTESTED"
+    keyStatus = "UNTESTED"
+    hashStatus = "UNTESTED"
+    if testSSL != None:
+        sslConnectStatus = StatusToStr(testSSL.m_testResults['connection'])
+        versionStatus = StatusToStr(testSSL.m_testResults['version'])
+        selfStatus = StatusToStr(testSSL.m_testResults['self-signed'])
+        validStatus = StatusToStr(testSSL.m_testResults['valid'])
+        cipherStatus = StatusToStr(testSSL.m_testResults['weak-cipher'])
+        keyStatus = StatusToStr(testSSL.m_testResults['key-size'])
+        hashStatus = StatusToStr(testSSL.m_testResults['weak-sign'])
+
+    # PHP
+    phpInjection = "UNTESTED"
+    phpDisclose = "UNTESTED"
+    phpSpoof = "UNTESTED"
+    if testPHP != None:
+        phpInjection = StatusToStr(testPHP.m_testResults['remote_include'])
+        phpDisclose = StatusToStr(testPHP.m_testResults['local_disclosure'])
+        phpSpoof = StatusToStr(testPHP.m_testResults['cookies'])
+
+    try:
+        hReport = None
+        if append == False:
+            hReport = open(g_testReport, "w+")
+        else:
+            hReport = open(g_testReport, "a+")
+
+        if hReport == None:
+            raise IOError("Unable to open file", 2)
+
+        if append == False:
+            hReport.write(g_reportHeader)
+
+        if testNet != None:
+            hReport.write("\n\n== Network Results ==\n")
+            hReport.write(">> Connection: {0}\n".format(connectStatus))
+            hReport.write(">> Port Scan: {0}\n".format(portStatus))
+            hReport.write(">> ICMP Echo: {0}\n".format(icmpStatus))
+
+        if testSSL != None:
+            hReport.write("\n== SSL Results ==\n")
+            hReport.write(">> SSL Connection: {0}\n".format(sslConnectStatus))
+            hReport.write(">> Good Version: {0}\n".format(versionStatus))
+            hReport.write(">> Not Self-Signed: {0}\n".format(selfStatus))
+            hReport.write(">> Valid Certificate: {0}\n".format(validStatus))
+            hReport.write(">> Strong Ciphers: {0}\n".format(cipherStatus))
+            hReport.write(">> Strong PKI Key: {0}\n".format(keyStatus))
+            hReport.write(">> Strong Signing Hash: {0}\n".format(hashStatus))
+
+        if testPHP != None:
+            hReport.write("\n== PHP Exploit Results ==\n")
+            hReport.write(">> Injection: {0}\n".format(phpInjection))
+            hReport.write(">> File Disclosure: {0}\n".format(phpDisclose))
+            hReport.write(">> Cookie Spoofing: {0}\n".format(phpSpoof))
+
+        if pluginTests != None:
+            hReport.write("\n== {0} Exploit Results [plugin] ==\n".format(hdr))
+
+            if isinstance(pluginTests, list):
+                for pluginTests in pluginTests:
+                    if isinstance(pluginTests, tuple):
+                        if pluginTests[0] == True:
+                            hReport.write(">> {0}: SUCCESS\n".format(pluginTests[1]))
+                        else:
+                            hReport.write(">> {0}: FAILED\n".format(pluginTests[1]))
+
+        hReport.close()
+
+    except (IOError, OSError) as err:
+        PrintLog("{0} \033[1;34m{1}\033[0m".format(err, type(err)), "Fatal")
+
+# Parse Command-Line args.
+ParseArgs(sys.argv)
+
+# Truncate the log.
+TruncateLog()
+
+# Attempt to import our classes.
+try:
+    from sec_utils.SecNET import SecNET
+    from sec_utils.SecSSL import SecSSL
+    from sec_utils.SecPHP import SecPHP
+    # from sec_utils.SecSSH import SecSSH
+    # from sec_utils.SecHTTP import SecHTTP
+except ImportError as err:
+    PrintLog("{0} \033[1;34m{1}\033[0m".format(err, type(err)), "Fatal")
+    sys.exit(255)
+
+# Ask for the hostname to hit.
+while g_lHostname == None or g_lHostname == "":
+    if sys.version_info[0] < 3:
+        g_lHostname = raw_input("Enter a hostname to test: ")
+    else:
+        sys.stdout.write("Enter a hostname to test: ")
+        sys.stdout.flush()
+        g_lHostname = sys.stdin.readline()
+        sys.stdin.flush()
+
+    g_lHostname.replace("\n", "")
+    g_lHostname.replace("\r", "")
+
+# Setup a success variable before hand.
+bSuccessful = False
+
+# Determine terminal colors.
+# We assume a standard XTERM.
+xterm = {'dred': "\033[31m", 'red': "\033[31m", 'orange': "\033[1;31m", 'dyellow': "\033[33m", 'yellow': "\033[1;33m", 'reset': "\033[37m"}
+
+if os.environ['TERM'] == "xterm-256color":
+    # 256-Color XTERM.
+    xterm = {'dred': "\033[38;5;124m", 'red': "\033[38;5;160m", 'orange': "\033[38;5;202m", 'dyellow': "\033[38;5;220m", 'yellow': "\033[38;5;226m", 'reset': "\033[38;5;252m"}
+elif os.environ['TERM'] != "xterm":
+    # Dumb XTERM.
+    xterm = {'dred': "\033[0m", 'red': "\033[0m", 'orange': "\033[0m", 'dyellow': "\033[0m", 'yellow': "\033[0m", 'reset': "\033[0m"}
+
+# Print the header of the test.
+sys.stdout.write("+--------------------------------------------------+\n|{1}   (                                              {0}|\n|{2}   )\ )                   (            )          {0}|\n|{3}  (()/(  (   (      (   ( )\  (     ( /(   (      {0}|\n|{4}   /(_)) )\  )(    ))\  )((_) )\ )  )\()) ))\ (   {0}|\n|{5}  (_))_|((_)(()\  /((_)((_)_ (()/( (_))/ /((_))\  {0}|\n|{1}  | |_   (_) ((_)(_))   | _ ) )(_))| |_ (_)) ((_) {0}|\n|{1}  | __|  | || '_|/ -_)  | _ \| || ||  _|/ -_)(_-< {0}|\n|{1}  |_|    |_||_|  \___|  |___/ \_, | \__|\___|/__/ {0}|\n|{1}                              |__/                {0}|\n+--------------------------------------------------+\n\n".format(xterm['reset'], xterm['dred'], xterm['red'], xterm['orange'], xterm['dyellow'], xterm['yellow']))
+sys.stdout.flush()
+
+# Move through and begin testing.
+testNet = SecNET()
+testSSL = SecSSL()
+testPHP = SecPHP()
+
+# Fire up the plugin manager.
+plugMan = None
+if g_testToRun['plugins'] == True:
+    plugMan = PluginManager()
+    plugMan.LoadPlugins(rhost=g_lHostname)
+    plugMan.ValidatePlugins()
+
+PrintLog("Testing basic Network...", "Info")
+if TestNetworking(testNet) == True:
+    PrintLog("Network test: PASSED!", "Success")
+else:
+    WriteReport(testNet, testSSL, testPHP)
+    sys.exit(255)
+    
+PrintLog("Testing SSL...", "Info")
+if TestSSL(testSSL) == True:
+    PrintLog("SSL test: PASSED!", "Success")
+else:
+    WriteReport(testNet, testSSL, testPHP)
+    sys.exit(255)
+
+PrintLog("Testing PHP...", "Info")
+if TestPHP(testPHP) == True:
+    PrintLog("PHP exploit tests: PASSED!", "Success")
+else:
+    WriteReport(testNet, testSSL, testPHP)
+    sys.exit(255)
+
+WriteReport(testNet, testSSL, testPHP)
+
+lPluginTests = None
+if g_testToRun['plugins'] == True:
+    PrintLog("Running through plugins...", "Info")
+
+    # Iterate over the installed plugins.
+    for plugin in plugMan.m_pluginList:
+        if plugin[1] in g_disabledPlugs:
+            PrintLog("Skipping plugin {0} as it's been disabled!".format(plugin[1]), "Info")
+            continue
+
+        # Run the plugin!
+        PrintLog("Running plugin: {0}".format(plugin[3]), "Info")
+        lPluginTests = plugMan.CallPlugin(plugin[0], 'Run')
+
+        bFailed = False
+        if isinstance(lPluginTests, list):
+            for pluginTest in lPluginTests:
+                if isinstance(pluginTest, tuple):
+                    if pluginTest[0] == True:
+                        PrintLog("{0}: PASS!".format(pluginTest[1]), "Success")
+                    else:
+                        PrintLog("{0}: FAIL!".format(pluginTest[1]), "Failure")
+                        bFailed = True
+
+                else:
+                    PrintLog("Found error in plugin return!", "Critical")
+                    continue
+            WriteReport(None, None, None, pluginTests=lPluginTests, append=True, hdr=plugin[3])
+        else:
+            PrintLog("Plugin returned wrong data type!", "Critical")
+            continue
+
+        # Append data to the report.
+
+# Destruct the plugins and exit!
+for plugin in plugMan.m_pluginList:
+    if plugin[1] not in g_disabledPlugs:
+        plugMan.CallPlugin(plugin[0], 'Destroy')
+
+# Exit!
+sys.exit(0)

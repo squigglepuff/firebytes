@@ -1,0 +1,198 @@
+#!/usr/bin/env python
+# *-* coding: utf-8 *-*
+
+# FIREPLUG_NAME: Unique name
+# FIREPLUG_UID: 1-line description
+# FIREPLUG_VER: 1
+
+import re
+import socket
+import os
+import os.path as path
+import subprocess
+
+from sec_utils.logger import fireIO
+
+# Popen handle for MSFCONSOLE.
+g_msfProc = None
+
+# Web repo location for remote fetching of metasploit resource.
+g_repoHost = "hostname.tld"
+g_repoURI = "/path/to/metasploit/resource"
+
+# Local location of the metasploit resource file(s).
+g_localResource = "/tmp/.Firebytes/name_of_resource_file"
+
+def Init(args=[], plug_id=0):
+    global fireIO
+    global g_msfProc
+    global g_repoHost
+    global g_repoURI
+    global g_localResource
+
+    # First argument is ALWAYS the host, extract it.
+    mRemoteHost = ""
+    if isinstance(args, list) and len(args) >= 1:
+        mRemoteHost = args[0]
+    else:
+        fireIO.write("Remote host not passed to plugin! Using default!", "Plugin", plugin_id=plug_id)
+
+    # Clear the variable.
+    g_msfProc = None
+
+    bSuccess = True
+    try:
+        # First check to make sure we don't need to fetch anything.
+        if not path.exists(g_localResource):
+            fireIO.write("\"{0}\" doesn't exist, checking if DIR exists...".format(g_localResource), "Debug")
+            # We do need to fetch some data, check if the location even exists.
+            if not path.exists(path.dirname(g_localResource)):
+                fireIO.write("\"{0}\" doesn't exist, creating it...".format(path.dirname(g_localResource)), "Debug")
+                # Create the location!
+                os.mkdir(path.dirname(g_localResource))
+
+            # Fetch the data!
+            htHeader = "GET {0} HTTP/1.1\r\nHost: {1}\r\nAccept: text/plain\r\nCache-Control: no-cache\r\nUser-Agent: Firebytes/1.0.0 (Python 2.7.x)\r\n\r\n".format(g_repoURI, g_repoHost)
+            
+            fireIO.write("Fetching metasploit resource...", "Debug")
+            httpSock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            httpSock.connect((g_repoHost, 80))
+            httpSock.settimeout(5)
+            httpSock.sendall(htHeader)
+            mResponse = ""
+
+            oldSz = 0
+            newSz = 1
+            while (newSz - oldSz) > 0:
+                oldSz = newSz
+                try:
+                    mResponse = "{0}{1}".format(mResponse, httpSock.recv(16777216)) # 16 MiB
+                except (socket.timeout, socket.error):
+                    break
+
+                newSz = len(mResponse)
+
+            httpSock.close()
+
+            fireIO.write("Socket finished, checking to see if we have data...", "Debug")
+            lRegExp = re.search('^HTTP\/[1-2]\.[0-9]\s([0-9]{3})(.|\n)*$', mResponse, re.IGNORECASE)
+            if lRegExp != None:
+                fireIO.write("We have data:\n{0}".format(mResponse), "Debug")
+                if "200" == lRegExp.group(1):
+                    # Separate the HTTP header from the payload.
+                    mPayload = mResponse.split("\r\n\r\n")[1]
+
+                    # Replace the RHOST values in the payload.
+                    if mRemoteHost != None and mRemoteHost != "":
+                        mPayloadList = mPayload.split("\n")
+                        mPayload = ""
+                        for line in mPayloadList:
+                            if re.match('^set\s+RHOST\s+.*', line, re.IGNORECASE):
+                                mPayload = "{0}set RHOST {1}\n".format(mPayload, mRemoteHost)
+                            else:
+                                mPayload = "{0}{1}\n".format(mPayload, line)
+
+                    fireIO.write("Payload: {0}".format(mPayload), "Debug")
+
+                    # Write the payload.
+                    hResource = open(g_localResource, "w+")
+                    hResource.write(mPayload)
+                    hResource.close()
+                    fireIO.write("Wrote {0} bytes to \"{1}\"".format(len(mPayload), g_localResource), "Debug")
+
+                    bSuccess = True
+                else:
+                    fireIO.write("ERR: http://{0}{1} responded with {2}!".format(g_repoHost, g_repoURI, lRegExp.group(1)), "Plugin", plugin_id=plug_id)
+                    bSuccess = False
+            else:
+                fireIO.write("ERR: Invalid response from http://{0}{1}".format(g_repoHost, g_repoURI), "Plugin", plugin_id=plug_id)
+                bSuccess = False
+    except (IOError, OSError, socket.error) as err:
+        fireIO.write("ERR: {0} \033[1;34m{1}\033[0m".format(err, type(err)), "Plugin", plugin_id=plug_id)
+        bSuccess = False
+
+    return bSuccess
+
+def Run(args=[], plug_id=0):
+    global fireIO # Global functor for fireIO.write
+    global g_msfProc
+    global g_localResource
+
+    msfPath = "/usr/bin/msfconsole"
+
+    rtnList = []
+
+	# We need to check and make sure that the resource file exists.
+    if path.exists(g_localResource) and path.exists(msfPath):
+        # File exists, fire up msfconsole in a Popen!
+        g_msfProc = subprocess.Popen([msfPath, '-r', g_localResource], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+
+        mData = ""
+        while g_msfProc.poll() == None:
+
+            for outLine in iter(g_msfProc.stdout.readline, b''):
+                g_msfProc.stdout.flush()
+                outLine = outLine.replace(b'\n', '')
+                outLine = outLine.replace(b'\r', '')
+                fireIO.write("{0}".format(outLine), "Plugin", plugin_id=plug_id)
+                mData = "{0}\n{1}".format(mData, outLine)
+
+        if g_msfProc.returncode != 0:
+            fireIO.write("ERR: Child process failed during execution!", "Plugin", plugin_id=plug_id)
+
+        # Parse through the printed data for "issues".
+        fireIO.write("mData:\n{0}".format(mData), "Debug")
+
+        mDataList = mData.split("\n")
+        fireIO.write("mDataList:\n{0}".format(mDataList), "Debug")
+
+        bInExploit = False
+        mName = ""
+        for dataLine in mDataList:
+            # Strip the escape characters.
+            regStrip = re.compile(r'\x1b[^m]*m')
+            dLine = regStrip.sub('', dataLine)
+
+            fireIO.write("dataLine: {0}".format(dLine), "Debug")
+            lRegExp1 = re.search('use\s.*\/([a-zA-Z0-9\-\_]+)$', dLine, re.IGNORECASE)
+
+            if bInExploit == True:
+                if re.match('^\[\-\]\s.*', dLine, re.IGNORECASE) or re.match(r'.*(Exploit\s+completed).*?(no\s+session).*', dLine, re.IGNORECASE):
+                    fireIO.write("(True) mName: {0}".format(mName), "Debug")
+                    rtnList.append((True, mName))
+                    bInExploit = False
+                    mName = ""
+                elif re.match('^\[\+\]\s.*', dLine, re.IGNORECASE):
+                    fireIO.write("(False) mName: {0}".format(mName), "Debug")
+                    rtnList.append((False, mName))
+                    bInExploit = False
+                    mName = ""
+                elif re.match(r'.*session\s+[0-9]*\s+?opened.*', dLine, re.IGNORECASE):
+                    fireIO.write("(False) mName: {0}".format(mName), "Debug")
+                    rtnList.append((False, mName))
+                    bInExploit = False
+                    mName = ""
+            else:
+                if lRegExp1 != None:
+                    mName = lRegExp1.group(1)
+                    fireIO.write("mName: {0}".format(mName), "Debug")
+                    bInExploit = True
+                    continue
+    else:
+        fireIO.write("ERR: {0} changed out from under us!?".format(g_localResource), "Plugin", plugin_id=plug_id)
+
+    return rtnList
+
+def Destroy(args=[], plug_id=0):
+    global g_msfProc
+    global g_localResource
+
+    if g_msfProc != None:
+        if hasattr(g_msfProc, 'close') and callable(g_msfProc.close):
+            g_msfProc.close()
+
+        del g_msfProc
+        g_msfProc = None
+
+    if path.exists(g_localResource):
+        os.unlink(g_localResource)

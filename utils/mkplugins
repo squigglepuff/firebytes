@@ -1,0 +1,8 @@
+#!/bin/bash
+
+rm -rfv ../plugins/*.fireplug
+
+pushd plugins/
+ls *.py | sed -r 's/^(.*)\.py$/\1/' | xargs -i ./create_fireplug "{}"
+mv -v *.fireplug ../../plugins/
+popd

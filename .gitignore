@@ -1,0 +1,4 @@
+*.pyc
+sec_utils/*.pyc
+sec_utils/*.log
+*.log

@@ -1,0 +1,11 @@
+#!/bin/bash
+
+SEARCH_DIR=$(readlink -m ../)
+
+find "$SEARCH_DIR" -iname '*.pyc' -exec rm -rfv {} \;
+INIT_FILES=($(find "$SEARCH_DIR" -iname '__init__.py'))
+
+for fPath in ${INIT_FILES[@]}; do
+	rm -rfv "$fPath"
+	touch "$fPath"
+done

@@ -1,0 +1,184 @@
+#!/usr/bin/env python
+# *-* coding: utf-8 *-*
+
+import sys
+import re
+import os
+import os.path as path
+import zlib
+from datetime import datetime as dt
+
+# g_allowDebug = False
+g_allowDebug = True
+
+g_baseString = "\033[33m<\033[34m{0}\033[33m> [\033[32m{1}\033[33m]"
+g_debugString = "\033[33m<\033[34m{0}\033[33m> [\033[32m{1}\033[33m] \033[35mDEBUG INFO:\033[0m {2}\n"
+
+'''
+\brief Log printing function
+
+This function simply prints to stderr or stdout a message and a log "level".
+'''
+def PrintLog(line, level, debug_info="", plugin_id=0):
+    global g_allowDebug
+    global g_baseString
+    global g_debugString
+
+    # Grab a time stamp.
+    dateStamp = dt.now().strftime("%x")
+    timeStamp = dt.now().strftime("%X")
+
+    g_baseString = g_baseString.format(dateStamp, timeStamp)
+    g_debugString = g_debugString.format(dateStamp, timeStamp, debug_info)
+
+    if line is not None and level is not None:
+        if re.match("^Fatal(\sError)?$", level, re.IGNORECASE):
+            sys.stderr.write("{0} \033[1;31m{1}:\033[0m {2}\n".format(g_baseString, level, line))
+
+        elif re.match("^(Critical|Error)$", level, re.IGNORECASE):
+            sys.stderr.write("{0} \033[31m{1}:\033[0m {2}\n".format(g_baseString, level, line))
+
+        elif re.match("^Warn(ing)?$", level, re.IGNORECASE):
+            sys.stderr.write("{0} \033[1;33m{1}:\033[0m {2}\n".format(g_baseString, level, line))
+
+        elif re.match("^Info(rmation)?$", level, re.IGNORECASE):
+            sys.stdout.write("{0} \033[34m{1}:\033[0m {2}\n".format(g_baseString, level, line))
+
+        elif g_allowDebug == True and re.match("^(Debug|Trace)$", level, re.IGNORECASE):
+            sys.stderr.write("{0} \033[35m{1}:\033[0m {2}\n".format(g_baseString, level, line))
+
+        elif re.match('^Failure$', level, re.IGNORECASE):
+            sys.stderr.write("{0} \033[1;31m{1}:\033[0m {2}\n".format(g_baseString, level.upper(), line))
+
+        elif re.match('^Success$', level, re.IGNORECASE):
+            sys.stderr.write("{0} \033[1;32m{1}:\033[0m {2}\n".format(g_baseString, level.upper(), line))
+
+        elif re.match('^Plugin$', level, re.IGNORECASE):
+            if os.environ['TERM'] == "xterm-256color":
+                sys.stdout.write("{0} \033[38;5;202m[{1} {2}]:\033[0m {3}\n".format(g_baseString, level, plugin_id, line))
+            else:
+                sys.stdout.write("{0} \033[1;33m[{1} {2}]:\033[0m {3}\n".format(g_baseString, level, plugin_id, line))
+
+        if g_allowDebug == True and debug_info != "":
+            sys.stderr.write(g_debugString)
+
+
+    if sys.version_info[0] >= 3:
+        sys.stdout.flush()
+        sys.stderr.flush()
+
+def AddWorkers(pyPath, pypPath):
+    bSuccess = False
+
+    if path.exists(pyPath):
+        # Here we need to write a function called "_VGVzdEZpcmVQbHVn" (_TestFirePlug).
+        mTestFxn = "def _VGVzdEZpcmVQbHVn():\n    return True\n"
+        mData = ""
+
+        # Read in the data.
+        try:
+            hPlug = open(pyPath, "r")
+            for blob in hPlug:
+                mData = "{0}{1}".format(mData, blob)
+            hPlug.close()
+
+            # Reset file descriptor.
+            del hPlug
+        except (IOError, OSError, RuntimeError) as err:
+            PrintLog("Unable to read plugin data for patching!", "Critical")
+            PrintLog("{0} \033[1;34m{1}\033[0m".format(err, type(err)), "Critical")
+
+        # Patch the data.
+        mData = "{0}\n\n{1}\n".format(mData, mTestFxn)
+
+        # Write the patched data.
+        try:
+            hPlug = open(pypPath, "w+")
+            hPlug.write(mData)
+            hPlug.close()
+
+            # Reset file descriptor.
+            del hPlug
+        except (IOError, OSError, RuntimeError) as err:
+            PrintLog("Unable to patch plugin data!", "Critical")
+            PrintLog("{0} \033[1;34m{1}\033[0m".format(err, type(err)), "Critical")
+    else:
+        PrintLog("Unable to locate Python file for patching! Abort!", "Fatal")
+        sys.exit(2)
+
+def CreatePlugin(plugin_name):
+    bSuccess = False
+
+    baseDir = path.dirname(path.realpath(__file__))
+
+    pyPath = "{0}/{1}.py".format(baseDir, plugin_name)
+    pypPath = "{0}/{1}.plug".format(baseDir, plugin_name)
+    plugPath = "{0}/{1}.fireplug".format(baseDir, plugin_name)
+
+    if path.exists(pyPath):
+        # Attempt to write some workers to the base of the plugin.
+        AddWorkers(pyPath, pypPath)
+
+        # Attempt to open the file in GZip.
+        try:
+            hPlug = open(pypPath, "rb")
+
+            mDecompressData = ""
+            for blob in hPlug:
+                mDecompressData = "{0}{1}".format(mDecompressData, blob)
+
+            hPlug.close()
+
+            if mDecompressData != None and mDecompressData != "":
+                # Attempt to INFLATE the data.
+                mData = zlib.compress(mDecompressData)
+
+                try:
+                    hPlug = open(plugPath, "w+")
+                    hPlug.write(mData)
+                    hPlug.close()
+
+                    # Cleanup!
+                    os.unlink(pypPath)
+
+                    bSuccess = True
+                    PrintLog("Successfully wrote FirePlug!", "Success")
+                except (IOError, OSError, RuntimeError) as err:
+                    PrintLog("Unable to write plugin data to \"{0}\"!".format(plugPath), "Critical")
+                    PrintLog("{0} \033[1;34m{1}\033[0m".format(err, type(err)), "Critical")
+            else:
+                PrintLog("Unable to read python data!", "Critical")
+        except (IOError, OSError, RuntimeError, zlib.error) as err:
+            PrintLog("{0} \033[1;34m{1}\033[0m".format(err, type(err)), "Critical")
+    else:
+        PrintLog("Unable to locate PY file @ \"{0}\"!".format(pyPath), "Critical")
+
+    return bSuccess
+
+# Ask the user for the plugin name.
+lPlugName = None
+
+for arg in sys.argv:
+    if re.match('.*create_fireplug$', arg, re.IGNORECASE):
+        continue
+
+    lPlugName = arg
+    break
+
+while lPlugName == None or lPlugName == "":
+    if sys.version_info[0] < 3:
+        lPlugName = raw_input("Enter a plugin name: ")
+    else:
+        sys.stdout.write("Enter a plugin name: ")
+        sys.stdout.flush()
+        lPlugName = sys.stdin.readline()
+        sys.stdin.flush()
+
+    lPlugName.replace("\n", "")
+    lPlugName.replace("\r", "")
+
+# Create the plugin!
+if CreatePlugin(lPlugName) == True:
+    sys.exit(0)
+else:
+    sys.exit(255)

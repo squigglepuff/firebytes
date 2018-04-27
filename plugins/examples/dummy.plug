@@ -1,0 +1,23 @@
+#!/usr/bin/env python
+# *-* coding: utf-8 *-*
+
+# FIREPLUG_NAME: Unique name
+# FIREPLUG_UID: 1-line description
+# FIREPLUG_VER: 1
+
+from sec_utils.logger import fireIO # We want to use Firebyte's logging system!
+
+def Init(args=[], plug_id=0):
+    # Code to initialize the plugin goes here!
+
+    return True # ALWAYS RETURN TRUE!
+
+def Run(args=[], plug_id=0):
+    # Code to RUN the plugin goes here!
+
+    return [()] # ALWAYS RETURN A LIST OF TUPLES!
+
+def Destroy(args=[], plug_id=0):
+    # Cleanup code goes here!
+
+    # ALWAYS CLEANUP! DON'T BE MESSY!
