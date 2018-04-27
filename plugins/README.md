@@ -64,6 +64,7 @@ This is due to Firebytes still being in it's infancy.
 The plug_id (integer) is simply the UUID of the plugin when loaded by Firebytes. This can be used for self-checking and logging.
 
 Once you have your plugin written, save it as a "\*.py" file in the following directory: "&lt;repo_base&gt;/utils/plugins". Then run the "mkplugins" script in the "&lt;repo_base&gt;/utils" directory.
+**NOTE:** When you run "mkplugins", you need to be *in* the "utils" directory.
 
 ## FireIO Logger
 --------
