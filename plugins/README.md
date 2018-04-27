@@ -47,8 +47,8 @@ def Destroy(args=[], plug_id=0):
 ```
 
 Here we see the basic setup of a plugin. Every plugin MUST have the following:
-* # FIREPLUG_NAME: &lt;name of plugin&gt;
-* # FIREPLUG_UID: &lt;unique description of plugin in 1 line&gt;
+* \# FIREPLUG_NAME: &lt;name of plugin&gt;
+* \# FIREPLUG_UID: &lt;unique description of plugin in 1 line&gt;
 * Init() definition
 * Run() definition
 * Destroy() definition
@@ -91,16 +91,7 @@ fireIO.TruncateLog() # Truncate the log to 0 bytes.
 * Plugin
 
 They look like the following in your shell:
-<div style="background-color: #333333; color: white;">
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#800000" weight="bold">Fatal:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#800000">Critical:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#808000" weight="bold">Warn:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#000080">Info:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#800080">Debug:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#800000" weight="bold">FAILURE:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#008000" weight="bold">SUCCESS:</font> Test Message
-  <font color="#808000">&lt;</font><font color="#000080">04/27/18</font><font color="#808000">&gt; [</font><font color="#008000">13:13:51</font><font color="#808000">]</font> <font color="#ff5f00">[Plugin 0]:</font> Test Message
-</div>
+![https://i.imgur.com/hJPZDnq.png](https://i.imgur.com/hJPZDnq.png "Log Levels in Shell")
 
 The `debug_info` argument is optional and allows you to pass potential debugging information at any level, this allows you to "trace" log statements and the call stack to a degree.
 
